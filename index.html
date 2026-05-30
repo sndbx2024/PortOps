@@ -2,25 +2,35 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Barcode Scanner to CSV (Mobile Friendly)</title>
+    <title>Barcode Scanner to CSV (Mobile 1D Only)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         body {
             font-family: sans-serif;
             margin: 0;
             padding: 0;
+            background: #f8f8f8;
+        }
+        #instructions {
+            background: #e0f7fa;
+            color: #006064;
+            padding: 10px 16px;
+            margin: 0 0 10px 0;
+            font-size: 1em;
         }
         #main-row {
             display: flex;
             flex-direction: row;
             align-items: flex-start;
             margin-bottom: 20px;
+            justify-content: center;
         }
         #scanner-container {
             width: 100vw;
             max-width: 400px;
-            height: 40vh;
+            height: 40vw;
             max-height: 300px;
+            min-height: 200px;
             position: relative;
             display: block;
             margin-right: 16px;
@@ -61,6 +71,11 @@
         }
         #scans-table { border-collapse: collapse; width: 100%; }
         #scans-table th, #scans-table td { border: 1px solid #ccc; padding: 8px; }
+        #error-message {
+            color: #b00;
+            font-weight: bold;
+            margin: 16px 0;
+        }
         @media (max-width: 700px) {
             #main-row {
                 flex-direction: column;
@@ -69,8 +84,9 @@
             #scanner-container {
                 width: 100vw;
                 max-width: 100vw;
-                height: 40vh;
-                max-height: 40vh;
+                height: 50vw;
+                max-height: 50vw;
+                min-height: 180px;
                 margin-right: 0;
                 margin-bottom: 16px;
             }
@@ -87,7 +103,11 @@
     </style>
 </head>
 <body>
-    <h2>Barcode Scanner (Mobile Friendly)</h2>
+    <h2>Barcode Scanner (Mobile 1D Only)</h2>
+    <div id="instructions">
+        <strong>Tip:</strong> Hold the barcode 4–8 inches from the camera and wait for it to focus. Use good lighting. Only 1D barcodes (UPC, EAN, Code 128, etc.) are supported.
+    </div>
+    <div id="error-message"></div>
     <div id="main-row">
         <div id="scanner-container">
             <div id="blackout-overlay"></div>
@@ -116,6 +136,7 @@
         let scans = [];
         let lastResults = [];
         const DEBOUNCE_COUNT = 3; // Require 3 identical consecutive scans
+        let scannerRunning = false;
 
         function addScan(barcode) {
             const timestamp = new Date().toISOString();
@@ -134,16 +155,26 @@
             }, 500); // 0.5 seconds
         }
 
+        function showError(msg) {
+            document.getElementById('error-message').textContent = msg;
+        }
+
+        function clearError() {
+            document.getElementById('error-message').textContent = '';
+        }
+
         function startScanner() {
+            if (scannerRunning) return;
+            clearError();
             Quagga.init({
                 inputStream: {
                     name: "Live",
                     type: "LiveStream",
                     target: document.querySelector('#scanner-container'),
                     constraints: {
-                        width: window.innerWidth > 400 ? 400 : window.innerWidth,
-                        height: window.innerHeight > 300 ? 300 : Math.floor(window.innerHeight * 0.4),
-                        facingMode: "environment" 
+                        facingMode: "environment",
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
                     }
                 },
                 decoder: {
@@ -164,19 +195,22 @@
                 }
             }, function(err) {
                 if (err) {
-                    alert("Error initializing scanner: " + err);
+                    showError("Error initializing scanner: " + err.name + " - " + err.message + ".\nMake sure you allow camera access and are using HTTPS.");
                     return;
                 }
                 Quagga.start();
+                scannerRunning = true;
             });
 
             Quagga.onDetected(onDetectedHandler);
         }
 
         function stopScanner() {
+            if (!scannerRunning) return;
             Quagga.offDetected(onDetectedHandler);
             Quagga.stop();
             lastResults = [];
+            scannerRunning = false;
         }
 
         function onDetectedHandler(result) {
@@ -222,6 +256,9 @@
         document.getElementById('stop-btn').addEventListener('click', stopScanner);
         document.getElementById('export-btn').addEventListener('click', exportCSV);
         document.getElementById('reset-btn').addEventListener('click', resetCSV);
+
+        // Optional: Stop scanner when navigating away
+        window.addEventListener('pagehide', stopScanner);
     </script>
 </body>
 </html>
