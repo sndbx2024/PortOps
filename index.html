@@ -115,13 +115,20 @@
     <script>
         let scans = [];
         let lastResults = [];
+        let currentVideoTrack = null; // Reference to the active video track for torch control
         const DEBOUNCE_COUNT = 3; // Require 3 identical consecutive scans
 
         function addScan(barcode) {
             const timestamp = new Date().toISOString();
             scans.push({ timestamp, barcode });
             const row = document.createElement('tr');
-            row.innerHTML = `<td>${timestamp}</td><td>${barcode}</td>`;
+            // Use textContent to prevent XSS injection
+            const tsCell = document.createElement('td');
+            tsCell.textContent = timestamp;
+            const bcCell = document.createElement('td');
+            bcCell.textContent = barcode;
+            row.appendChild(tsCell);
+            row.appendChild(bcCell);
             document.getElementById('scans-body').appendChild(row);
             blackoutScanner();
         }
@@ -132,6 +139,58 @@
             setTimeout(() => {
                 overlay.style.opacity = '0';
             }, 500); // 0.5 seconds
+        }
+
+        // Enable the device flashlight (torch) if supported
+        async function enableTorch() {
+            try {
+                const videoElem = document.querySelector('#scanner-container video');
+                if (!videoElem || !videoElem.srcObject) {
+                    console.warn("No video stream available for torch control.");
+                    return;
+                }
+                const stream = videoElem.srcObject;
+                const tracks = stream.getVideoTracks();
+                if (!tracks || tracks.length === 0) {
+                    console.warn("No video tracks found.");
+                    return;
+                }
+                currentVideoTrack = tracks[0];
+                const capabilities = currentVideoTrack.getCapabilities
+                    ? currentVideoTrack.getCapabilities()
+                    : {};
+                if (capabilities.torch) {
+                    await currentVideoTrack.applyConstraints({
+                        advanced: [{ torch: true }]
+                    });
+                    console.log("Torch enabled.");
+                } else {
+                    console.warn("Torch is not supported on this device/browser.");
+                }
+            } catch (err) {
+                console.warn("Unable to enable torch:", err);
+            }
+        }
+
+        // Disable the device flashlight (torch) if it was enabled
+        async function disableTorch() {
+            try {
+                if (currentVideoTrack) {
+                    const capabilities = currentVideoTrack.getCapabilities
+                        ? currentVideoTrack.getCapabilities()
+                        : {};
+                    if (capabilities.torch) {
+                        await currentVideoTrack.applyConstraints({
+                            advanced: [{ torch: false }]
+                        });
+                        console.log("Torch disabled.");
+                    }
+                }
+            } catch (err) {
+                console.warn("Unable to disable torch:", err);
+            } finally {
+                currentVideoTrack = null;
+            }
         }
 
         function startScanner() {
@@ -168,13 +227,17 @@
                     return;
                 }
                 Quagga.start();
+                // Wait briefly for the video track to be ready, then enable torch
+                setTimeout(enableTorch, 500);
             });
 
             Quagga.onDetected(onDetectedHandler);
         }
 
-        function stopScanner() {
+        async function stopScanner() {
             Quagga.offDetected(onDetectedHandler);
+            // Turn off torch BEFORE stopping Quagga, so the track is still active
+            await disableTorch();
             Quagga.stop();
             lastResults = [];
         }
@@ -196,16 +259,16 @@
                     }
                     lastResults = [];
                 }
-            } else {
-                // Optionally, provide feedback for rejected barcodes
-                // blackoutScanner(); // Uncomment if you want a visual cue
             }
         }
 
         function exportCSV() {
             let csvContent = "Timestamp,Barcode\n";
             scans.forEach(scan => {
-                csvContent += `"${scan.timestamp}","${scan.barcode}"\n`;
+                // Escape any double quotes in data to prevent CSV injection issues
+                const safeTs = String(scan.timestamp).replace(/"/g, '""');
+                const safeBc = String(scan.barcode).replace(/"/g, '""');
+                csvContent += `"${safeTs}","${safeBc}"\n`;
             });
             const blob = new Blob([csvContent], { type: "text/csv" });
             const url = URL.createObjectURL(blob);
