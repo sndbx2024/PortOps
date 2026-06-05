@@ -116,10 +116,6 @@
         let scans = [];
         let lastResults = [];
         const DEBOUNCE_COUNT = 3; // Require 3 identical consecutive scans
-        let streamTrack = null; // For flashlight control
-
-        // Your Google Apps Script Web App URL
-        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzbXg-vp6HJIzxNsESSBfv5jsBD9E246kF1yMuiy4IediDpGLWbJiV9v5T3uUsTB-zMDA/exec';
 
         function addScan(barcode) {
             const timestamp = new Date().toISOString();
@@ -128,46 +124,6 @@
             row.innerHTML = `<td>${timestamp}</td><td>${barcode}</td>`;
             document.getElementById('scans-body').appendChild(row);
             blackoutScanner();
-            sendBarcodeToSheet(barcode, timestamp);
-        }
-
-        function sendBarcodeToSheet(barcode, timestamp) {
-            // Input validation
-            if (typeof barcode !== 'string' || barcode.length === 0) {
-                console.error('Invalid barcode');
-                return;
-            }
-            if (typeof timestamp !== 'string' || isNaN(Date.parse(timestamp))) {
-                console.error('Invalid timestamp');
-                return;
-            }
-            // Prepare the data as JSON
-            const data = {
-                barcode: barcode,
-                timestamp: timestamp
-            };
-            // Send POST request
-            fetch(WEB_APP_URL, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(data)
-            })
-            .then(response => {
-                if (!response.ok) throw new Error('Network response was not ok');
-                return response.json();
-            })
-            .then(result => {
-                if (result.success) {
-                    console.log('Barcode updated in Google Sheet successfully.');
-                } else {
-                    console.error('Error updating Google Sheet:', result.error);
-                }
-            })
-            .catch(error => {
-                console.error('Network or server error:', error);
-            });
         }
 
         function blackoutScanner() {
@@ -178,41 +134,15 @@
             }, 500); // 0.5 seconds
         }
 
-        async function startScanner() {
-            // Try to get the camera with torch capability
-            let constraints = {
-                video: {
-                    facingMode: { ideal: 'environment' },
-                    width: window.innerWidth > 400 ? 400 : window.innerWidth,
-                    height: window.innerHeight > 300 ? 300 : Math.floor(window.innerHeight * 0.4),
-                    // torch will be enabled after stream is started
-                }
-            };
-            try {
-                let stream = await navigator.mediaDevices.getUserMedia(constraints);
-                let videoTrack = stream.getVideoTracks()[0];
-                streamTrack = videoTrack;
-                // Try to turn on the torch (flashlight)
-                const imageCapture = new window.ImageCapture(videoTrack);
-                const capabilities = await imageCapture.getPhotoCapabilities();
-                if (capabilities.torch) {
-                    await videoTrack.applyConstraints({ advanced: [{ torch: true }] });
-                    console.log('Flashlight turned ON');
-                } else {
-                    console.log('Torch capability not available on this device.');
-                }
-            } catch (err) {
-                console.warn('Could not enable flashlight:', err);
-            }
-
+        function startScanner() {
             Quagga.init({
                 inputStream: {
                     name: "Live",
                     type: "LiveStream",
                     target: document.querySelector('#scanner-container'),
                     constraints: {
-                        width: window.innerWidth > 400 ? 400 : window.innerWidth,
-                        height: window.innerHeight > 300 ? 300 : Math.floor(window.innerHeight * 0.4),
+                        width: { ideal: 1280 }, // Higher resolution for better scanning
+                        height: { ideal: 720 },
                         facingMode: "environment"
                     }
                 },
@@ -247,15 +177,6 @@
             Quagga.offDetected(onDetectedHandler);
             Quagga.stop();
             lastResults = [];
-            // Turn off flashlight if possible
-            if (streamTrack) {
-                try {
-                    streamTrack.applyConstraints({ advanced: [{ torch: false }] });
-                } catch (e) {
-                    // Some browsers/devices may not support this
-                }
-                streamTrack = null;
-            }
         }
 
         function onDetectedHandler(result) {
