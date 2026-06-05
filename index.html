@@ -61,6 +61,15 @@
         }
         #scans-table { border-collapse: collapse; width: 100%; }
         #scans-table th, #scans-table td { border: 1px solid #ccc; padding: 8px; }
+        #status-message {
+            margin: 10px 0;
+            padding: 8px;
+            font-weight: bold;
+            min-height: 1.2em;
+        }
+        .status-success { color: green; }
+        .status-error { color: red; }
+        .status-info { color: #333; }
         @media (max-width: 700px) {
             #main-row {
                 flex-direction: column;
@@ -99,12 +108,14 @@
             <button id="reset-btn">Reset CSV</button>
         </div>
     </div>
+    <div id="status-message" class="status-info">Ready to scan.</div>
     <h3>Scanned Barcodes</h3>
     <table id="scans-table">
         <thead>
             <tr>
                 <th>Timestamp</th>
                 <th>Barcode</th>
+                <th>Sheet Status</th>
             </tr>
         </thead>
         <tbody id="scans-body"></tbody>
@@ -113,24 +124,54 @@
     <!-- QuaggaJS CDN -->
     <script src="https://unpkg.com/@ericblade/quagga2/dist/quagga.min.js"></script>
     <script>
+        // ===== CONFIGURATION =====
+        // Your Google Apps Script Web App URL
+        const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzbXg-vp6HJIzxNsESSBfv5jsBD9E246kF1yMuiy4IediDpGLWbJiV9v5T3uUsTB-zMDA/exec";
+
+        // Required prefix for accepted barcodes
+        const REQUIRED_PREFIX = "AW";
+        // Minimum length (must be GREATER than this value)
+        const MIN_BARCODE_LENGTH = 7;
+
         let scans = [];
         let lastResults = [];
-        let currentVideoTrack = null; // Reference to the active video track for torch control
-        const DEBOUNCE_COUNT = 3; // Require 3 identical consecutive scans
+        let currentVideoTrack = null;
+        const DEBOUNCE_COUNT = 3;
+
+        function setStatus(message, type) {
+            const el = document.getElementById('status-message');
+            el.textContent = message;
+            el.className = 'status-' + (type || 'info');
+        }
+
+        // Validate barcode: must start with "AW" and be longer than 7 characters
+        function isValidBarcode(barcode) {
+            if (typeof barcode !== 'string') return false;
+            if (barcode.length <= MIN_BARCODE_LENGTH) return false;
+            if (!barcode.startsWith(REQUIRED_PREFIX)) return false;
+            return true;
+        }
 
         function addScan(barcode) {
             const timestamp = new Date().toISOString();
             scans.push({ timestamp, barcode });
             const row = document.createElement('tr');
-            // Use textContent to prevent XSS injection
+            // Use textContent to prevent XSS
             const tsCell = document.createElement('td');
             tsCell.textContent = timestamp;
             const bcCell = document.createElement('td');
             bcCell.textContent = barcode;
+            const statusCell = document.createElement('td');
+            statusCell.textContent = 'Sending...';
+            statusCell.style.color = '#666';
             row.appendChild(tsCell);
             row.appendChild(bcCell);
+            row.appendChild(statusCell);
             document.getElementById('scans-body').appendChild(row);
             blackoutScanner();
+
+            // Send to Google Sheet
+            sendBarcodeToSheet(barcode, timestamp, statusCell);
         }
 
         function blackoutScanner() {
@@ -138,41 +179,84 @@
             overlay.style.opacity = '1';
             setTimeout(() => {
                 overlay.style.opacity = '0';
-            }, 500); // 0.5 seconds
+            }, 500);
         }
 
-        // Enable the device flashlight (torch) if supported
+        // Securely POST the barcode + timestamp to the Apps Script Web App
+        async function sendBarcodeToSheet(barcode, timestamp, statusCell) {
+            // Input validation (defense in depth)
+            if (!isValidBarcode(barcode)) {
+                if (statusCell) {
+                    statusCell.textContent = 'Invalid barcode';
+                    statusCell.style.color = 'red';
+                }
+                return;
+            }
+            if (barcode.length > 100) {
+                if (statusCell) {
+                    statusCell.textContent = 'Barcode too long';
+                    statusCell.style.color = 'red';
+                }
+                return;
+            }
+            try {
+                const payload = JSON.stringify({
+                    barcode: barcode,
+                    timestamp: timestamp
+                });
+                // Use text/plain to avoid CORS preflight with Apps Script
+                const response = await fetch(APPS_SCRIPT_URL, {
+                    method: 'POST',
+                    mode: 'cors',
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                    body: payload,
+                    redirect: 'follow'
+                });
+                if (!response.ok) {
+                    throw new Error('HTTP ' + response.status);
+                }
+                const result = await response.json();
+                if (result.success) {
+                    if (statusCell) {
+                        statusCell.textContent = 'Loaded (row ' + result.row + ')';
+                        statusCell.style.color = 'green';
+                    }
+                    setStatus('Marked as loaded: ' + barcode, 'success');
+                } else {
+                    if (statusCell) {
+                        statusCell.textContent = result.error || 'Not found';
+                        statusCell.style.color = 'red';
+                    }
+                    setStatus('Sheet update failed: ' + (result.error || 'Unknown'), 'error');
+                }
+            } catch (err) {
+                console.warn('Sheet update error:', err);
+                if (statusCell) {
+                    statusCell.textContent = 'Network error';
+                    statusCell.style.color = 'red';
+                }
+                setStatus('Could not reach Google Sheet.', 'error');
+            }
+        }
+
         async function enableTorch() {
             try {
                 const videoElem = document.querySelector('#scanner-container video');
-                if (!videoElem || !videoElem.srcObject) {
-                    console.warn("No video stream available for torch control.");
-                    return;
-                }
-                const stream = videoElem.srcObject;
-                const tracks = stream.getVideoTracks();
-                if (!tracks || tracks.length === 0) {
-                    console.warn("No video tracks found.");
-                    return;
-                }
+                if (!videoElem || !videoElem.srcObject) return;
+                const tracks = videoElem.srcObject.getVideoTracks();
+                if (!tracks || tracks.length === 0) return;
                 currentVideoTrack = tracks[0];
                 const capabilities = currentVideoTrack.getCapabilities
                     ? currentVideoTrack.getCapabilities()
                     : {};
                 if (capabilities.torch) {
-                    await currentVideoTrack.applyConstraints({
-                        advanced: [{ torch: true }]
-                    });
-                    console.log("Torch enabled.");
-                } else {
-                    console.warn("Torch is not supported on this device/browser.");
+                    await currentVideoTrack.applyConstraints({ advanced: [{ torch: true }] });
                 }
             } catch (err) {
-                console.warn("Unable to enable torch:", err);
+                console.warn('Unable to enable torch:', err);
             }
         }
 
-        // Disable the device flashlight (torch) if it was enabled
         async function disableTorch() {
             try {
                 if (currentVideoTrack) {
@@ -180,20 +264,18 @@
                         ? currentVideoTrack.getCapabilities()
                         : {};
                     if (capabilities.torch) {
-                        await currentVideoTrack.applyConstraints({
-                            advanced: [{ torch: false }]
-                        });
-                        console.log("Torch disabled.");
+                        await currentVideoTrack.applyConstraints({ advanced: [{ torch: false }] });
                     }
                 }
             } catch (err) {
-                console.warn("Unable to disable torch:", err);
+                console.warn('Unable to disable torch:', err);
             } finally {
                 currentVideoTrack = null;
             }
         }
 
         function startScanner() {
+            setStatus('Starting scanner...', 'info');
             Quagga.init({
                 inputStream: {
                     name: "Live",
@@ -223,49 +305,49 @@
                 }
             }, function(err) {
                 if (err) {
+                    setStatus('Error initializing scanner.', 'error');
                     alert("Error initializing scanner: " + err);
                     return;
                 }
                 Quagga.start();
-                // Wait briefly for the video track to be ready, then enable torch
+                setStatus('Scanning for barcodes starting with "AW"...', 'info');
                 setTimeout(enableTorch, 500);
             });
-
             Quagga.onDetected(onDetectedHandler);
         }
 
         async function stopScanner() {
             Quagga.offDetected(onDetectedHandler);
-            // Turn off torch BEFORE stopping Quagga, so the track is still active
             await disableTorch();
             Quagga.stop();
             lastResults = [];
+            setStatus('Scanner stopped.', 'info');
         }
 
         function onDetectedHandler(result) {
             const barcode = result.codeResult.code;
-            // Only accept barcodes longer than 7 digits/characters
-            if (barcode && barcode.length > 7) {
-                lastResults.push(barcode);
-                if (lastResults.length > DEBOUNCE_COUNT) {
-                    lastResults.shift();
+            // Only accept barcodes that start with "AW" and are longer than 7 characters
+            if (!isValidBarcode(barcode)) {
+                return;
+            }
+            lastResults.push(barcode);
+            if (lastResults.length > DEBOUNCE_COUNT) {
+                lastResults.shift();
+            }
+            if (
+                lastResults.length === DEBOUNCE_COUNT &&
+                lastResults.every(val => val === lastResults[0])
+            ) {
+                if (!scans.length || scans[scans.length - 1].barcode !== barcode) {
+                    addScan(barcode);
                 }
-                if (
-                    lastResults.length === DEBOUNCE_COUNT &&
-                    lastResults.every(val => val === lastResults[0])
-                ) {
-                    if (!scans.length || scans[scans.length - 1].barcode !== barcode) {
-                        addScan(barcode);
-                    }
-                    lastResults = [];
-                }
+                lastResults = [];
             }
         }
 
         function exportCSV() {
             let csvContent = "Timestamp,Barcode\n";
             scans.forEach(scan => {
-                // Escape any double quotes in data to prevent CSV injection issues
                 const safeTs = String(scan.timestamp).replace(/"/g, '""');
                 const safeBc = String(scan.barcode).replace(/"/g, '""');
                 csvContent += `"${safeTs}","${safeBc}"\n`;
@@ -285,6 +367,7 @@
             scans = [];
             document.getElementById('scans-body').innerHTML = '';
             lastResults = [];
+            setStatus('Scan list cleared.', 'info');
         }
 
         document.getElementById('start-btn').addEventListener('click', startScanner);
