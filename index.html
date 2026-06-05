@@ -141,7 +141,7 @@
                     type: "LiveStream",
                     target: document.querySelector('#scanner-container'),
                     constraints: {
-                        width: { ideal: 1280 }, // Higher resolution for better scanning
+                        width: { ideal: 1280 },
                         height: { ideal: 720 },
                         facingMode: "environment"
                     }
@@ -181,18 +181,21 @@
 
         function onDetectedHandler(result) {
             const barcode = result.codeResult.code;
-            lastResults.push(barcode);
-            if (lastResults.length > DEBOUNCE_COUNT) {
-                lastResults.shift();
-            }
-            if (
-                lastResults.length === DEBOUNCE_COUNT &&
-                lastResults.every(val => val === lastResults[0])
-            ) {
-                if (!scans.length || scans[scans.length - 1].barcode !== barcode) {
-                    addScan(barcode);
+            // Only accept barcodes longer than 7 digits/characters
+            if (barcode && barcode.length > 7) {
+                lastResults.push(barcode);
+                if (lastResults.length > DEBOUNCE_COUNT) {
+                    lastResults.shift();
                 }
-                lastResults = [];
+                if (
+                    lastResults.length === DEBOUNCE_COUNT &&
+                    lastResults.every(val => val === lastResults[0])
+                ) {
+                    if (!scans.length || scans[scans.length - 1].barcode !== barcode) {
+                        addScan(barcode);
+                    }
+                    lastResults = [];
+                }
             }
         }
 
