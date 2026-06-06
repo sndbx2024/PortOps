@@ -218,10 +218,10 @@
                 const result = await response.json();
                 if (result.success) {
                     if (statusCell) {
-                        statusCell.textContent = 'Loaded (row ' + result.row + ')';
+                        statusCell.textContent = 'At port (row ' + result.row + ')';
                         statusCell.style.color = 'green';
                     }
-                    setStatus('Marked as loaded: ' + barcode, 'success');
+                    setStatus('Marked as At port: ' + barcode, 'success');
                 } else {
                     if (statusCell) {
                         statusCell.textContent = result.error || 'Not found';
