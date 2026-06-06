@@ -5,93 +5,68 @@
     <title>Barcode Scanner to CSV (Mobile Friendly)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-        body {
-            font-family: sans-serif;
-            margin: 0;
-            padding: 0;
-        }
+        body { font-family: sans-serif; margin: 0; padding: 0; }
         #main-row {
-            display: flex;
-            flex-direction: row;
-            align-items: flex-start;
-            margin-bottom: 20px;
+            display: flex; flex-direction: row;
+            align-items: flex-start; margin-bottom: 20px;
         }
         #scanner-container {
-            width: 100vw;
-            max-width: 400px;
-            height: 40vh;
-            max-height: 300px;
-            position: relative;
-            display: block;
-            margin-right: 16px;
-            overflow: hidden;
-            background: #222;
+            width: 100vw; max-width: 400px;
+            height: 40vh; max-height: 300px;
+            position: relative; display: block;
+            margin-right: 16px; overflow: hidden; background: #222;
         }
         #scanner-container video,
         #scanner-container canvas {
-            width: 100% !important;
-            height: 100% !important;
-            object-fit: cover;
-            position: absolute;
-            top: 0; left: 0;
-            z-index: 1;
+            width: 100% !important; height: 100% !important;
+            object-fit: cover; position: absolute;
+            top: 0; left: 0; z-index: 1;
         }
         #blackout-overlay {
-            position: absolute;
-            top: 0; left: 0; right: 0; bottom: 0;
+            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
             width: 100%; height: 100%;
-            background: #000;
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity 0.1s;
-            z-index: 10;
+            background: #000; opacity: 0;
+            pointer-events: none; transition: opacity 0.1s; z-index: 10;
         }
-        #button-column {
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
-        }
+        #button-column { display: flex; flex-direction: column; gap: 16px; }
         button {
-            min-width: 120px;
-            min-height: 44px;
-            font-size: 1.1em;
-            border-radius: 8px;
-            border: 1px solid #888;
-            background: #f0f0f0;
+            min-width: 120px; min-height: 44px;
+            font-size: 1.1em; border-radius: 8px;
+            border: 1px solid #888; background: #f0f0f0;
         }
         #scans-table { border-collapse: collapse; width: 100%; }
         #scans-table th, #scans-table td { border: 1px solid #ccc; padding: 8px; }
         #status-message {
-            margin: 10px 0;
-            padding: 8px;
-            font-weight: bold;
-            min-height: 1.2em;
+            margin: 10px 0; padding: 8px;
+            font-weight: bold; min-height: 1.2em;
         }
         .status-success { color: green; }
         .status-error { color: red; }
         .status-info { color: #333; }
+        #popup-modal {
+            display: none; position: fixed; z-index: 1000;
+            left: 0; top: 0; width: 100vw; height: 100vh;
+            background: rgba(0,0,0,0.5);
+            justify-content: center; align-items: center;
+        }
+        #popup-content {
+            background: #fff; padding: 24px; border-radius: 12px;
+            box-shadow: 0 2px 16px rgba(0,0,0,0.2);
+            text-align: center;
+        }
+        #popup-content button {
+            margin: 12px 16px 0 16px;
+            min-width: 100px;
+        }
         @media (max-width: 700px) {
-            #main-row {
-                flex-direction: column;
-                align-items: stretch;
-            }
+            #main-row { flex-direction: column; align-items: stretch; }
             #scanner-container {
-                width: 100vw;
-                max-width: 100vw;
-                height: 40vh;
-                max-height: 40vh;
-                margin-right: 0;
-                margin-bottom: 16px;
+                width: 100vw; max-width: 100vw;
+                height: 40vh; max-height: 40vh;
+                margin-right: 0; margin-bottom: 16px;
             }
-            #button-column {
-                flex-direction: row;
-                gap: 8px;
-                justify-content: center;
-            }
-            button {
-                min-width: 80px;
-                font-size: 1em;
-            }
+            #button-column { flex-direction: row; gap: 8px; justify-content: center; }
+            button { min-width: 80px; font-size: 1em; }
         }
     </style>
 </head>
@@ -115,28 +90,35 @@
             <tr>
                 <th>Timestamp</th>
                 <th>Barcode</th>
+                <th>Status</th>
                 <th>Sheet Status</th>
             </tr>
         </thead>
         <tbody id="scans-body"></tbody>
     </table>
 
-    <!-- QuaggaJS CDN -->
+    <!-- Popup Modal -->
+    <div id="popup-modal">
+        <div id="popup-content">
+            <div id="popup-barcode"></div>
+            <button id="at-port-btn">At Port</button>
+            <button id="loaded-btn">Loaded</button>
+        </div>
+    </div>
+
     <script src="https://unpkg.com/@ericblade/quagga2/dist/quagga.min.js"></script>
     <script>
         // ===== CONFIGURATION =====
-        // Your Google Apps Script Web App URL
-        const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyKZ3slFe6tqh6ew7vd4xjd15ub5kxEGyoFQiKJkczgneJvl1C4RMESg74K5BJKo4MAKw/exec";
-
-        // Required prefix for accepted barcodes
+        const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzbXg-vp6HJIzxNsESSBfv5jsBD9E246kF1yMuiy4IediDpGLWbJiV9v5T3uUsTB-zMDA/exec";
         const REQUIRED_PREFIX = "AW";
-        // Minimum length (must be GREATER than this value)
-        const MIN_BARCODE_LENGTH = 7;
+        const MIN_BARCODE_LENGTH = 7; // must be GREATER than this
 
         let scans = [];
         let lastResults = [];
         let currentVideoTrack = null;
         const DEBOUNCE_COUNT = 3;
+        let pendingBarcode = null;
+        let pendingTimestamp = null;
 
         function setStatus(message, type) {
             const el = document.getElementById('status-message');
@@ -144,67 +126,64 @@
             el.className = 'status-' + (type || 'info');
         }
 
-        // Validate barcode: must start with "AW" and be longer than 7 characters
         function isValidBarcode(barcode) {
             if (typeof barcode !== 'string') return false;
             if (barcode.length <= MIN_BARCODE_LENGTH) return false;
+            if (barcode.length > 100) return false;
             if (!barcode.startsWith(REQUIRED_PREFIX)) return false;
             return true;
         }
 
-        function addScan(barcode) {
-            const timestamp = new Date().toISOString();
-            scans.push({ timestamp, barcode });
+        function showPopup(barcode, timestamp) {
+            pendingBarcode = barcode;
+            pendingTimestamp = timestamp;
+            document.getElementById('popup-barcode').textContent = `Barcode: ${barcode}`;
+            document.getElementById('popup-modal').style.display = 'flex';
+        }
+
+        function hidePopup() {
+            document.getElementById('popup-modal').style.display = 'none';
+            pendingBarcode = null;
+            pendingTimestamp = null;
+        }
+
+        function addScan(barcode, timestamp, status) {
+            scans.push({ timestamp, barcode, status });
             const row = document.createElement('tr');
-            // Use textContent to prevent XSS
             const tsCell = document.createElement('td');
             tsCell.textContent = timestamp;
             const bcCell = document.createElement('td');
             bcCell.textContent = barcode;
             const statusCell = document.createElement('td');
-            statusCell.textContent = 'Sending...';
-            statusCell.style.color = '#666';
+            statusCell.textContent = status;
+            const sheetStatusCell = document.createElement('td');
+            sheetStatusCell.textContent = 'Sending...';
+            sheetStatusCell.style.color = '#666';
             row.appendChild(tsCell);
             row.appendChild(bcCell);
             row.appendChild(statusCell);
+            row.appendChild(sheetStatusCell);
             document.getElementById('scans-body').appendChild(row);
             blackoutScanner();
-
-            // Send to Google Sheet
-            sendBarcodeToSheet(barcode, timestamp, statusCell);
+            sendBarcodeToSheet(barcode, timestamp, status, sheetStatusCell);
         }
 
         function blackoutScanner() {
             const overlay = document.getElementById('blackout-overlay');
             overlay.style.opacity = '1';
-            setTimeout(() => {
-                overlay.style.opacity = '0';
-            }, 500);
+            setTimeout(() => { overlay.style.opacity = '0'; }, 500);
         }
 
-        // Securely POST the barcode + timestamp to the Apps Script Web App
-        async function sendBarcodeToSheet(barcode, timestamp, statusCell) {
-            // Input validation (defense in depth)
+        async function sendBarcodeToSheet(barcode, timestamp, status, sheetStatusCell) {
             if (!isValidBarcode(barcode)) {
-                if (statusCell) {
-                    statusCell.textContent = 'Invalid barcode';
-                    statusCell.style.color = 'red';
-                }
-                return;
-            }
-            if (barcode.length > 100) {
-                if (statusCell) {
-                    statusCell.textContent = 'Barcode too long';
-                    statusCell.style.color = 'red';
+                if (sheetStatusCell) {
+                    sheetStatusCell.textContent = 'Invalid barcode';
+                    sheetStatusCell.style.color = 'red';
                 }
                 return;
             }
             try {
-                const payload = JSON.stringify({
-                    barcode: barcode,
-                    timestamp: timestamp
-                });
-                // Use text/plain to avoid CORS preflight with Apps Script
+                const payload = JSON.stringify({ barcode: barcode, timestamp: timestamp, status: status });
                 const response = await fetch(APPS_SCRIPT_URL, {
                     method: 'POST',
                     mode: 'cors',
@@ -212,28 +191,26 @@
                     body: payload,
                     redirect: 'follow'
                 });
-                if (!response.ok) {
-                    throw new Error('HTTP ' + response.status);
-                }
+                if (!response.ok) throw new Error('HTTP ' + response.status);
                 const result = await response.json();
                 if (result.success) {
-                    if (statusCell) {
-                        statusCell.textContent = 'At port (row ' + result.row + ')';
-                        statusCell.style.color = 'green';
+                    if (sheetStatusCell) {
+                        sheetStatusCell.textContent = 'Updated (row ' + result.row + ')';
+                        sheetStatusCell.style.color = 'green';
                     }
-                    setStatus('Marked as At port: ' + barcode, 'success');
+                    setStatus('Sheet updated: ' + barcode, 'success');
                 } else {
-                    if (statusCell) {
-                        statusCell.textContent = result.error || 'Not found';
-                        statusCell.style.color = 'red';
+                    if (sheetStatusCell) {
+                        sheetStatusCell.textContent = result.error || 'Not found';
+                        sheetStatusCell.style.color = 'red';
                     }
                     setStatus('Sheet update failed: ' + (result.error || 'Unknown'), 'error');
                 }
             } catch (err) {
                 console.warn('Sheet update error:', err);
-                if (statusCell) {
-                    statusCell.textContent = 'Network error';
-                    statusCell.style.color = 'red';
+                if (sheetStatusCell) {
+                    sheetStatusCell.textContent = 'Network error';
+                    sheetStatusCell.style.color = 'red';
                 }
                 setStatus('Could not reach Google Sheet.', 'error');
             }
@@ -247,31 +224,24 @@
                 if (!tracks || tracks.length === 0) return;
                 currentVideoTrack = tracks[0];
                 const capabilities = currentVideoTrack.getCapabilities
-                    ? currentVideoTrack.getCapabilities()
-                    : {};
+                    ? currentVideoTrack.getCapabilities() : {};
                 if (capabilities.torch) {
                     await currentVideoTrack.applyConstraints({ advanced: [{ torch: true }] });
                 }
-            } catch (err) {
-                console.warn('Unable to enable torch:', err);
-            }
+            } catch (err) { console.warn('Unable to enable torch:', err); }
         }
 
         async function disableTorch() {
             try {
                 if (currentVideoTrack) {
                     const capabilities = currentVideoTrack.getCapabilities
-                        ? currentVideoTrack.getCapabilities()
-                        : {};
+                        ? currentVideoTrack.getCapabilities() : {};
                     if (capabilities.torch) {
                         await currentVideoTrack.applyConstraints({ advanced: [{ torch: false }] });
                     }
                 }
-            } catch (err) {
-                console.warn('Unable to disable torch:', err);
-            } finally {
-                currentVideoTrack = null;
-            }
+            } catch (err) { console.warn('Unable to disable torch:', err); }
+            finally { currentVideoTrack = null; }
         }
 
         function startScanner() {
@@ -289,17 +259,10 @@
                 },
                 decoder: {
                     readers: [
-                        "code_128_reader",
-                        "ean_reader",
-                        "ean_8_reader",
-                        "code_39_reader",
-                        "code_39_vin_reader",
-                        "codabar_reader",
-                        "upc_reader",
-                        "upc_e_reader",
-                        "i2of5_reader",
-                        "2of5_reader",
-                        "code_93_reader"
+                        "code_128_reader","ean_reader","ean_8_reader",
+                        "code_39_reader","code_39_vin_reader","codabar_reader",
+                        "upc_reader","upc_e_reader","i2of5_reader",
+                        "2of5_reader","code_93_reader"
                     ],
                     locate: true
                 }
@@ -326,31 +289,26 @@
 
         function onDetectedHandler(result) {
             const barcode = result.codeResult.code;
-            // Only accept barcodes that start with "AW" and are longer than 7 characters
-            if (!isValidBarcode(barcode)) {
-                return;
-            }
+            if (!isValidBarcode(barcode)) return;
             lastResults.push(barcode);
-            if (lastResults.length > DEBOUNCE_COUNT) {
-                lastResults.shift();
-            }
-            if (
-                lastResults.length === DEBOUNCE_COUNT &&
-                lastResults.every(val => val === lastResults[0])
-            ) {
+            if (lastResults.length > DEBOUNCE_COUNT) lastResults.shift();
+            if (lastResults.length === DEBOUNCE_COUNT &&
+                lastResults.every(val => val === lastResults[0])) {
                 if (!scans.length || scans[scans.length - 1].barcode !== barcode) {
-                    addScan(barcode);
+                    const timestamp = new Date().toISOString();
+                    showPopup(barcode, timestamp);
                 }
                 lastResults = [];
             }
         }
 
         function exportCSV() {
-            let csvContent = "Timestamp,Barcode\n";
+            let csvContent = "Timestamp,Barcode,Status\n";
             scans.forEach(scan => {
                 const safeTs = String(scan.timestamp).replace(/"/g, '""');
                 const safeBc = String(scan.barcode).replace(/"/g, '""');
-                csvContent += `"${safeTs}","${safeBc}"\n`;
+                const safeStatus = String(scan.status).replace(/"/g, '""');
+                csvContent += `"${safeTs}","${safeBc}","${safeStatus}"\n`;
             });
             const blob = new Blob([csvContent], { type: "text/csv" });
             const url = URL.createObjectURL(blob);
@@ -369,6 +327,20 @@
             lastResults = [];
             setStatus('Scan list cleared.', 'info');
         }
+
+        // Popup button handlers
+        document.getElementById('at-port-btn').addEventListener('click', function() {
+            if (pendingBarcode && pendingTimestamp) {
+                addScan(pendingBarcode, pendingTimestamp, 'at port');
+            }
+            hidePopup();
+        });
+        document.getElementById('loaded-btn').addEventListener('click', function() {
+            if (pendingBarcode && pendingTimestamp) {
+                addScan(pendingBarcode, pendingTimestamp, 'loaded');
+            }
+            hidePopup();
+        });
 
         document.getElementById('start-btn').addEventListener('click', startScanner);
         document.getElementById('stop-btn').addEventListener('click', stopScanner);
