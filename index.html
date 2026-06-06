@@ -344,4 +344,50 @@
         });
     </script>
 </body>
+
+    // Add this function to your HTML (inside a <script> tag or your JS file)
+function showDebug(msg) {
+    let el = document.getElementById('debug-output');
+    if (!el) {
+        el = document.createElement('pre');
+        el.id = 'debug-output';
+        el.style = 'background:#eee; color:#c00; padding:8px; font-size:12px; position:fixed; bottom:0; left:0; width:100vw; max-height:30vh; overflow:auto; z-index:9999;';
+        document.body.appendChild(el);
+    }
+    el.textContent += msg + '\n';
+}
+
+// Example: Wrap your fetch call to Google Apps Script like this:
+async function sendBarcodeToSheet(barcode, timestamp, status) {
+    try {
+        const payload = JSON.stringify({ barcode, timestamp, status });
+        showDebug('Sending to Sheet: ' + payload);
+        const response = await fetch(APPS_SCRIPT_URL, {
+            method: 'POST',
+            mode: 'cors',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: payload,
+            redirect: 'follow'
+        });
+        showDebug('HTTP status: ' + response.status);
+        const text = await response.text();
+        showDebug('Raw response: ' + text);
+        try {
+            const json = JSON.parse(text);
+            showDebug('Parsed JSON: ' + JSON.stringify(json));
+            if (!json.success) {
+                showDebug('Sheet error: ' + (json.error || 'Unknown error'));
+            }
+        } catch (e) {
+            showDebug('Response is not valid JSON');
+        }
+    } catch (err) {
+        showDebug('Fetch/network error: ' + err);
+    }
+}
+
+// Call sendBarcodeToSheet(barcode, timestamp, status) wherever you would normally send the scan to the sheet.
+// For example:
+// sendBarcodeToSheet('AW12345678', new Date().toISOString(), 'Loaded');
+    
 </html>
