@@ -83,6 +83,7 @@
             <button id="stop-btn">Stop Scanning</button>
             <button id="export-btn">Export CSV</button>
             <button id="reset-btn">Reset CSV</button>
+            <button id="manual-tcn-btn" type="button">Manual TCN</button>
         </div>
     </div>
     <div id="status-message" class="status-info">Ready to scan.</div>
@@ -94,6 +95,7 @@
                 <th>Barcode</th>
                 <th>Status</th>
                 <th>Sheet Status</th>
+                <th>Entry Type</th>
             </tr>
         </thead>
         <tbody id="scans-body"></tbody>
@@ -104,6 +106,15 @@
             <div id="popup-buttons"></div>
         </div>
     </div>
+    <!-- Manual TCN Popup (hidden by default) -->
+    <div id="manual-tcn-popup" style="display:none; position:fixed; top:30%; left:50%; transform:translate(-50%, -50%); background:#fff; border:1px solid #888; padding:20px; z-index:1000; box-shadow:0 2px 8px #0003;">
+      <label for="manual-tcn-input">Enter TCN:</label>
+      <input type="text" id="manual-tcn-input" maxlength="100" style="width:200px;">
+      <br><br>
+      <button id="manual-tcn-submit" type="button">Submit</button>
+      <button id="manual-tcn-cancel" type="button">Cancel</button>
+      <div id="manual-tcn-error" style="color:red; margin-top:10px;"></div>
+    </div>
     <pre id="debug-output"></pre>
     <script src="https://unpkg.com/@ericblade/quagga2/dist/quagga.min.js"></script>
     <script>
@@ -112,11 +123,11 @@
         const REQUIRED_PREFIX = "AW";
         const MIN_BARCODE_LENGTH = 7; // must be GREATER than this
         const STATUS_OPTIONS = [
-            "Already at port",
-            "CLH",
-            "TRM",
-            "Rail",
-            "Other"
+            "At port",
+            "Green Bay",
+            "Green Ocean",
+            "ARC Integrity",
+            "Boat 4"
         ];
 
         let scans = [];
@@ -149,9 +160,9 @@
             return true;
         }
 
-        function addScan(barcode, status) {
+        function addScan(barcode, status, isManual) {
             const timestamp = new Date().toISOString();
-            scans.push({ timestamp, barcode, status });
+            scans.push({ timestamp, barcode, status, isManual: !!isManual });
 
             const row = document.createElement('tr');
             const tsCell = document.createElement('td');
@@ -163,10 +174,13 @@
             const sheetStatusCell = document.createElement('td');
             sheetStatusCell.textContent = 'Sending...';
             sheetStatusCell.style.color = '#666';
+            const entryTypeCell = document.createElement('td');
+            entryTypeCell.textContent = isManual ? 'Manual' : 'Scanned';
             row.appendChild(tsCell);
             row.appendChild(bcCell);
             row.appendChild(statusCell);
             row.appendChild(sheetStatusCell);
+            row.appendChild(entryTypeCell);
             document.getElementById('scans-body').appendChild(row);
 
             blackoutScanner();
@@ -310,17 +324,17 @@
             if (lastResults.length === DEBOUNCE_COUNT &&
                 lastResults.every(val => val === lastResults[0])) {
                 if (!scans.length || scans[scans.length - 1].barcode !== barcode) {
-                    onBarcodeScanned(barcode);
+                    onBarcodeScanned(barcode, false);
                 }
                 lastResults = [];
             }
         }
 
-        function onBarcodeScanned(barcode) {
-            showStatusPopup(barcode);
+        function onBarcodeScanned(barcode, isManual) {
+            showStatusPopup(barcode, isManual);
         }
 
-        function showStatusPopup(barcode) {
+        function showStatusPopup(barcode, isManual) {
             const overlay = document.getElementById('popup-overlay');
             const buttonsDiv = document.getElementById('popup-buttons');
             buttonsDiv.innerHTML = '';
@@ -329,7 +343,7 @@
                 btn.textContent = option;
                 btn.onclick = function() {
                     overlay.style.display = 'none';
-                    addScan(barcode, option);
+                    addScan(barcode, option, isManual);
                 };
                 buttonsDiv.appendChild(btn);
             });
@@ -337,12 +351,13 @@
         }
 
         function exportCSV() {
-            let csvContent = "Timestamp,Barcode,Status\n";
+            let csvContent = "Timestamp,Barcode,Status,EntryType\n";
             scans.forEach(scan => {
                 const safeTs = String(scan.timestamp).replace(/"/g, '""');
                 const safeBc = String(scan.barcode).replace(/"/g, '""');
                 const safeStatus = String(scan.status).replace(/"/g, '""');
-                csvContent += `"${safeTs}","${safeBc}","${safeStatus}"\n`;
+                const entryType = scan.isManual ? 'Manual' : 'Scanned';
+                csvContent += `"${safeTs}","${safeBc}","${safeStatus}","${entryType}"\n`;
             });
             const blob = new Blob([csvContent], { type: "text/csv" });
             const url = URL.createObjectURL(blob);
@@ -366,6 +381,30 @@
         document.getElementById('stop-btn').addEventListener('click', stopScanner);
         document.getElementById('export-btn').addEventListener('click', exportCSV);
         document.getElementById('reset-btn').addEventListener('click', resetCSV);
+
+        // Manual TCN JS Logic
+        document.getElementById('manual-tcn-btn').addEventListener('click', function() {
+            document.getElementById('manual-tcn-popup').style.display = 'block';
+            document.getElementById('manual-tcn-input').value = '';
+            document.getElementById('manual-tcn-error').textContent = '';
+            document.getElementById('manual-tcn-input').focus();
+        });
+
+        document.getElementById('manual-tcn-cancel').addEventListener('click', function() {
+            document.getElementById('manual-tcn-popup').style.display = 'none';
+        });
+
+        document.getElementById('manual-tcn-submit').addEventListener('click', function() {
+            const tcn = document.getElementById('manual-tcn-input').value.trim();
+            // Validate TCN (must start with AW and be at least 8 chars)
+            if (!tcn.startsWith('AW') || tcn.length < 8) {
+                document.getElementById('manual-tcn-error').textContent = 'Invalid TCN. Must start with AW and be at least 8 characters.';
+                return;
+            }
+            document.getElementById('manual-tcn-popup').style.display = 'none';
+            // Call your barcode handler as if scanned
+            onBarcodeScanned(tcn, true); // true = manual entry
+        });
     </script>
 </body>
 </html>
