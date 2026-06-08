@@ -1,0 +1,86 @@
+<!-- index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Unit and Bumper Number Tracker</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f4f4f4; }
+        .container { max-width: 400px; margin: 50px auto; background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        button { width: 100%; padding: 12px; margin: 8px 0; font-size: 16px; }
+        input[type="text"] { width: 100%; padding: 10px; font-size: 16px; margin: 8px 0; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div id="step1">
+            <button id="startBtn">Start New Entry</button>
+        </div>
+        <div id="step2" class="hidden">
+            <p>Select Unit:</p>
+            <button class="unitBtn" data-unit="HHT BDE">HHT BDE</button>
+            <button class="unitBtn" data-unit="6-9">6-9</button>
+            <button class="unitBtn" data-unit="2-7">2-7</button>
+            <button class="unitBtn" data-unit="215BSB">215BSB</button>
+            <button class="unitBtn" data-unit="3BEB">3BEB</button>
+            <button class="unitBtn" data-unit="3-8">3-8</button>
+            <button class="unitBtn" data-unit="1-12">1-12</button>
+            <button class="unitBtn" data-unit="2-82FA">2-82FA</button>
+        </div>
+        <div id="step3" class="hidden">
+            <p>Enter Bumper Number:</p>
+            <input type="text" id="bumperInput" maxlength="20" pattern="[A-Za-z0-9]+" autocomplete="off" required />
+            <button id="submitBumper">Submit</button>
+            <p id="errorMsg" style="color:red; display:none;">Invalid input. Only letters and numbers allowed, no spaces or dashes.</p>
+        </div>
+        <div id="confirmation" class="hidden">
+            <p>Entry recorded successfully!</p>
+        </div>
+    </div>
+    <script>
+        // Step navigation
+        const step1 = document.getElementById('step1');
+        const step2 = document.getElementById('step2');
+        const step3 = document.getElementById('step3');
+        const confirmation = document.getElementById('confirmation');
+        let selectedUnit = '';
+
+        document.getElementById('startBtn').onclick = function() {
+            step1.classList.add('hidden');
+            step2.classList.remove('hidden');
+        };
+
+        document.querySelectorAll('.unitBtn').forEach(btn => {
+            btn.onclick = function() {
+                selectedUnit = this.getAttribute('data-unit');
+                step2.classList.add('hidden');
+                step3.classList.remove('hidden');
+            };
+        });
+
+        document.getElementById('submitBumper').onclick = function() {
+            const bumperInput = document.getElementById('bumperInput').value.trim();
+            const errorMsg = document.getElementById('errorMsg');
+            // Validate: only letters and numbers, no spaces or dashes
+            if (/^[A-Za-z0-9]+$/.test(bumperInput)) {
+                errorMsg.style.display = 'none';
+                // Here you would send the data to the backend (Java servlet)
+                // For now, just show confirmation
+                step3.classList.add('hidden');
+                confirmation.classList.remove('hidden');
+                // Optionally, reset for new entry after a delay
+                setTimeout(() => {
+                    confirmation.classList.add('hidden');
+                    step1.classList.remove('hidden');
+                    document.getElementById('bumperInput').value = '';
+                }, 2000);
+            } else {
+                errorMsg.style.display = 'block';
+            }
+        };
+    </script>
+</body>
+</html>
