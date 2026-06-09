@@ -1,21 +1,3 @@
-/*** ============================================================
- *  Code.gs  —  Google Apps Script (server-side)
- *  Unit Entry Tracker -> Google Sheet updater
- *
- *  DEPLOYMENT STEPS
- *  1. Go to https://script.google.com  ->  New project.
- *  2. Paste this file into Code.gs.
- *  3. Add an HTML file named exactly "Index" (File > New > HTML file)
- *     and paste the front-end HTML (second code block) into it.
- *  4. (Recommended) Store the Sheet ID in Script Properties instead
- *     of source:  Project Settings > Script Properties >
- *        add  SHEET_ID = 1ksOJ5B_NCHhkWFqV4n-1AsIWQ3KSOp5xA3FBBMteidk
- *  5. Deploy > New deployment > type "Web app".
- *        Execute as: Me
- *        Who has access: <your organization>  (NOT "Anyone" if data is sensitive)
- *  6. Authorize when prompted, copy the /exec URL, open it in a browser.
- * ============================================================ ***/
-
 // --- Configuration ---------------------------------------------------------
 // Prefer Script Properties; fall back to constant only if not set.
 function getSheetId_() {
