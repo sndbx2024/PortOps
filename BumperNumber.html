@@ -1,162 +1,252 @@
-/*** ============================================================
- *  Code.gs  —  Google Apps Script (server-side)
- *  Unit Entry Tracker -> Google Sheet updater
- *
- *  DEPLOYMENT STEPS
- *  1. Go to https://script.google.com  ->  New project.
- *  2. Paste this file into Code.gs.
- *  3. Add an HTML file named exactly "Index" (File > New > HTML file)
- *     and paste the front-end HTML (second code block) into it.
- *  4. (Recommended) Store the Sheet ID in Script Properties instead
- *     of source:  Project Settings > Script Properties >
- *        add  SHEET_ID = 1ksOJ5B_NCHhkWFqV4n-1AsIWQ3KSOp5xA3FBBMteidk
- *  5. Deploy > New deployment > type "Web app".
- *        Execute as: Me
- *        Who has access: <your organization>  (NOT "Anyone" if data is sensitive)
- *  6. Authorize when prompted, copy the /exec URL, open it in a browser.
- * ============================================================ ***/
+<!--
+  Unit Entry Tracker Web App (v2.1.0)
+  Connected to Google Sheet tab: TCN_Data
+  The tab name is set in Code.gs as: var SHEET_TAB_NAME = 'TCN_Data';
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Unit Entry Tracker</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 2em; }
+        .hidden { display: none; }
+        .button-group button { margin: 0.5em; padding: 1em 2em; font-size: 1em; }
+        .error { color: red; margin-top: 0.5em; }
+        table { border-collapse: collapse; margin-top: 2em; width: 100%; }
+        th, td { border: 1px solid #ccc; padding: 0.5em 1em; text-align: left; }
+        th { background: #f0f0f0; }
+        .table-controls { margin: 1em 0; }
+        .table-controls button { margin-right: 1em; }
+        #version-banner { font-weight: bold; padding: 0.5em 1em; margin-bottom: 1em; border-radius: 4px; background: #eee; color: #333; }
+        #version-banner.ok { background: #2ecc40; color: #fff; }
+        #status-line { margin-top: 1em; font-size: 1em; color: #0074d9; }
+    </style>
+</head>
+<body>
+    <!-- VERSION BANNER -->
+    <div id="version-banner">v2.1.0 — Unit Entry Tracker | Connected to tab: <b>TCN_Data</b> | JS status: (waiting…)</div>
+    <div id="start-page">
+        <button id="start-entry-btn">Start New Entry</button>
+    </div>
+    <div id="unit-selection-page" class="hidden">
+        <h2>Select Unit</h2>
+        <div class="button-group">
+            <button class="unit-btn" data-unit="HHT BDE">HHT BDE</button>
+            <button class="unit-btn" data-unit="6-9CAV">6-9CAV</button>
+            <button class="unit-btn" data-unit="2-7CAV">2-7CAV</button>
+            <button class="unit-btn" data-unit="215 BSB">215 BSB</button>
+            <button class="unit-btn" data-unit="3 BEB">3 BEB</button>
+            <button class="unit-btn" data-unit="3-8">3-8</button>
+            <button class="unit-btn" data-unit="1-12CAV">1-12CAV</button>
+            <button class="unit-btn" data-unit="2-82FA">2-82FA</button>
+        </div>
+    </div>
+    <div id="bumper-entry-page" class="hidden">
+        <h2>Enter Bumper Number</h2>
+        <form id="bumper-form" autocomplete="off">
+            <input type="text" id="bumper-input" maxlength="20" pattern="[A-Za-z0-9]+" required placeholder="Bumper Number (letters/numbers only)">
+            <button type="submit">Submit</button>
+        </form>
+        <div id="bumper-error" class="error"></div>
+    </div>
+    <div id="ship-selection-page" class="hidden">
+        <h2>Select Ship</h2>
+        <div class="button-group">
+            <button class="ship-btn" data-ship="At port">At port</button>
+            <button class="ship-btn" data-ship="Green Bay">Green Bay</button>
+            <button class="ship-btn" data-ship="Green Ocean">Green Ocean</button>
+            <button class="ship-btn" data-ship="ARC Integrity">ARC Integrity</button>
+            <button class="ship-btn" data-ship="Boat 4">Boat 4</button>
+        </div>
+    </div>
+    <div id="entries-section">
+        <div class="table-controls">
+            <button id="export-csv-btn">Export as CSV</button>
+            <button id="clear-table-btn">Clear Table</button>
+        </div>
+        <table id="entries-table">
+            <thead>
+                <tr>
+                    <th>Unit</th>
+                    <th>Bumper Number</th>
+                    <th>Ship</th>
+                    <th>Timestamp</th>
+                    <th>Sheet Update</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Entries will be inserted here -->
+            </tbody>
+        </table>
+        <div id="status-line"></div>
+    </div>
+    <script>
+        // DOM-based HTML escaping for XSS safety
+        function escapeHTML(str) {
+            const div = document.createElement('div');
+            div.textContent = String(str);
+            return div.innerHTML;
+        }
 
-// --- Configuration ---------------------------------------------------------
-// Prefer Script Properties; fall back to constant only if not set.
-function getSheetId_() {
-  var fromProps = PropertiesService.getScriptProperties().getProperty('SHEET_ID');
-  return fromProps || '1ksOJ5B_NCHhkWFqV4n-1AsIWQ3KSOp5xA3FBBMteidk';
-}
+        // CSV formula-injection protection
+        function csvSafe(field) {
+            const dangerous = /^[=+\-@\t\r]/;
+            let s = String(field);
+            if (dangerous.test(s)) s = "'" + s;
+            return '"' + s.replace(/"/g, '""') + '"';
+        }
 
-var SHEET_TAB_NAME = ''; // '' = use the first/active sheet. Set a name to target a specific tab.
+        document.addEventListener('DOMContentLoaded', function() {
+            // Version banner status
+            const versionBanner = document.getElementById('version-banner');
+            versionBanner.classList.add('ok');
+            versionBanner.innerHTML = 'v2.1.0 — Unit Entry Tracker | Connected to tab: <b>TCN_Data</b> | JS status: <b>RUNNING ✓</b> — Ready';
 
-// Allow-lists (server-side enforcement; never trust the client) --------------
-var ALLOWED_UNITS = ['HHT BDE', '6-9CAV', '2-7CAV', '215 BSB', '3 BEB', '3-8', '1-12CAV', '2-82FA'];
-var ALLOWED_SHIPS = ['At port', 'Green Bay', 'Green Ocean', 'ARC Integrity', 'Boat 4'];
+            const startPage = document.getElementById('start-page');
+            const unitSelectionPage = document.getElementById('unit-selection-page');
+            const bumperEntryPage = document.getElementById('bumper-entry-page');
+            const shipSelectionPage = document.getElementById('ship-selection-page');
+            const entriesSection = document.getElementById('entries-section');
+            const startEntryBtn = document.getElementById('start-entry-btn');
+            const bumperForm = document.getElementById('bumper-form');
+            const bumperInput = document.getElementById('bumper-input');
+            const bumperError = document.getElementById('bumper-error');
+            const entriesTableBody = document.querySelector('#entries-table tbody');
+            const exportCsvBtn = document.getElementById('export-csv-btn');
+            const clearTableBtn = document.getElementById('clear-table-btn');
+            const statusLine = document.getElementById('status-line');
 
-// Header names exactly as they appear in row 1 of the sheet ------------------
-var HDR_UNIT   = 'UNIT';            // expected column A
-var HDR_BUMPER = 'bumper no space'; // expected column M
-var HDR_STATUS = 'status';          // expected column J
-var HDR_TIME   = 'time';            // expected column K
+            let selectedUnit = null;
+            let bumperNumber = null;
+            let entries = [];
 
-// --- Web app entry point ---------------------------------------------------
-function doGet() {
-  return HtmlService.createHtmlOutputFromFile('Index')
-    .setTitle('Unit Entry Tracker')
-}
+            function showStartPage() {
+                startPage.classList.remove('hidden');
+                unitSelectionPage.classList.add('hidden');
+                bumperEntryPage.classList.add('hidden');
+                shipSelectionPage.classList.add('hidden');
+            }
 
-/**
- * Called from the client via google.script.run.
- * @param {Object} payload {unit, bumper, ship, timestamp}
- * @return {Object} {ok:boolean, status:'UPDATED'|'NO_MATCH'|'INVALID'|'ERROR', message:string}
- */
-function recordEntry(payload) {
-  var lock = LockService.getScriptLock();
-  try {
-    // Serialize writes to avoid race conditions / double updates.
-    lock.waitLock(15000);
+            function updateTable() {
+                entriesTableBody.innerHTML = '';
+                entries.forEach(entry => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `<td>${escapeHTML(entry.unit)}</td><td>${escapeHTML(entry.bumper)}</td><td>${escapeHTML(entry.ship)}</td><td>${escapeHTML(entry.timestamp)}</td><td>${escapeHTML(entry.sheetStatus)}</td>`;
+                    entriesTableBody.appendChild(tr);
+                });
+            }
 
-    // ---- 1. Validate & sanitize input (defense in depth) ----
-    if (!payload || typeof payload !== 'object') {
-      return result_(false, 'INVALID', 'Malformed request.');
-    }
-    var unit   = sanitize_(payload.unit);
-    var bumper = sanitize_(payload.bumper);
-    var ship   = sanitize_(payload.ship);
-    var ts     = sanitize_(payload.timestamp);
+            function resetEntryState() {
+                selectedUnit = null;
+                bumperNumber = null;
+            }
 
-    if (ALLOWED_UNITS.indexOf(unit) === -1) {
-      return result_(false, 'INVALID', 'Unrecognized unit.');
-    }
-    if (ALLOWED_SHIPS.indexOf(ship) === -1) {
-      return result_(false, 'INVALID', 'Unrecognized ship.');
-    }
-    if (!/^[A-Za-z0-9]+$/.test(bumper)) {
-      return result_(false, 'INVALID', 'Bumper must be letters/numbers only.');
-    }
-    // Validate ISO-8601 timestamp; if bad, regenerate server-side.
-    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(ts)) {
-      ts = new Date().toISOString();
-    }
+            startEntryBtn.addEventListener('click', function() {
+                startPage.classList.add('hidden');
+                unitSelectionPage.classList.remove('hidden');
+            });
 
-    // ---- 2. Open the sheet ----
-    var ss = SpreadsheetApp.openById(getSheetId_());
-    var sheet = SHEET_TAB_NAME ? ss.getSheetByName(SHEET_TAB_NAME) : ss.getSheets()[0];
-    if (!sheet) {
-      return result_(false, 'ERROR', 'Target sheet/tab not found.');
-    }
+            document.querySelectorAll('.unit-btn').forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    selectedUnit = btn.getAttribute('data-unit');
+                    unitSelectionPage.classList.add('hidden');
+                    bumperEntryPage.classList.remove('hidden');
+                    bumperInput.value = '';
+                    bumperError.textContent = '';
+                    bumperInput.focus();
+                });
+            });
 
-    var lastRow = sheet.getLastRow();
-    var lastCol = sheet.getLastColumn();
-    if (lastRow < 2) {
-      return result_(false, 'NO_MATCH', 'Sheet has no data rows.');
-    }
+            bumperForm.addEventListener('submit', function(e) {
+                e.preventDefault();
+                const value = bumperInput.value.trim();
+                if (!/^[A-Za-z0-9]+$/.test(value)) {
+                    bumperError.textContent = 'Only letters and numbers are allowed. No spaces or dashes.';
+                    return;
+                }
+                bumperError.textContent = '';
+                bumperNumber = value;
+                bumperEntryPage.classList.add('hidden');
+                shipSelectionPage.classList.remove('hidden');
+            });
 
-    // ---- 3. Resolve columns by HEADER NAME (safer than fixed letters) ----
-    var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
-    var cUnit   = indexOfHeader_(headers, HDR_UNIT);
-    var cBumper = indexOfHeader_(headers, HDR_BUMPER);
-    var cStatus = indexOfHeader_(headers, HDR_STATUS);
-    var cTime   = indexOfHeader_(headers, HDR_TIME);
+            document.querySelectorAll('.ship-btn').forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    const selectedShip = btn.getAttribute('data-ship');
+                    const timestamp = new Date().toISOString();
+                    // Add entry to table immediately with pending status
+                    const entry = {
+                        unit: selectedUnit,
+                        bumper: bumperNumber,
+                        ship: selectedShip,
+                        timestamp: timestamp,
+                        sheetStatus: 'Saving…'
+                    };
+                    entries.push(entry);
+                    updateTable();
+                    resetEntryState();
+                    shipSelectionPage.classList.add('hidden');
+                    showStartPage();
+                    statusLine.textContent = 'Saving to Google Sheet…';
+                    // Call server to update sheet
+                    google.script.run
+                        .withSuccessHandler(function(result) {
+                            entry.sheetStatus = result && result.status ? result.status : 'ERROR';
+                            updateTable();
+                            statusLine.textContent = result && result.message ? result.message : 'Unknown server response.';
+                        })
+                        .withFailureHandler(function(err) {
+                            entry.sheetStatus = 'ERROR';
+                            updateTable();
+                            statusLine.textContent = 'Server error: ' + (err && err.message ? err.message : err);
+                        })
+                        .recordEntry({
+                            unit: entry.unit,
+                            bumper: entry.bumper,
+                            ship: entry.ship,
+                            timestamp: entry.timestamp
+                        });
+                });
+            });
 
-    var missing = [];
-    if (cUnit   < 0) missing.push(HDR_UNIT);
-    if (cBumper < 0) missing.push(HDR_BUMPER);
-    if (cStatus < 0) missing.push(HDR_STATUS);
-    if (cTime   < 0) missing.push(HDR_TIME);
-    if (missing.length) {
-      return result_(false, 'ERROR', 'Missing header column(s): ' + missing.join(', '));
-    }
+            exportCsvBtn.addEventListener('click', function() {
+                if (entries.length === 0) {
+                    statusLine.textContent = 'No entries to export.';
+                    return;
+                }
+                let csv = 'Unit,Bumper Number,Ship,Timestamp,Sheet Update\n';
+                entries.forEach(entry => {
+                    const row = [entry.unit, entry.bumper, entry.ship, entry.timestamp, entry.sheetStatus].map(csvSafe).join(',');
+                    csv += row + '\n';
+                });
+                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'entries.csv';
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => {
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }, 0);
+                statusLine.textContent = 'CSV exported.';
+            });
 
-    // ---- 4. Find the matching row (UNIT + bumper no space) ----
-    var data = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
-    var wantUnit   = unit.toLowerCase();
-    var wantBumper = bumper.toLowerCase();
-    var foundRow = -1;
+            clearTableBtn.addEventListener('click', function() {
+                if (confirm('Are you sure you want to clear all entries?')) {
+                    entries = [];
+                    updateTable();
+                    statusLine.textContent = 'Table cleared.';
+                }
+            });
 
-    for (var i = 0; i < data.length; i++) {
-      var rowUnit   = String(data[i][cUnit]   == null ? '' : data[i][cUnit]).trim().toLowerCase();
-      var rowBumper = String(data[i][cBumper] == null ? '' : data[i][cBumper]).trim().toLowerCase();
-      if (rowUnit === wantUnit && rowBumper === wantBumper) {
-        foundRow = i + 2; // +2: array is 0-based and starts at sheet row 2
-        break;
-      }
-    }
-
-    if (foundRow === -1) {
-      return result_(false, 'NO_MATCH',
-        'No row where UNIT="' + unit + '" and bumper="' + bumper + '".');
-    }
-
-    // ---- 5. Write status (col J) and time (col K) ----
-    // Plain strings only -> avoids any formula injection into the sheet.
-    sheet.getRange(foundRow, cStatus + 1).setValue("'" /*force text*/ ? ship : ship);
-    sheet.getRange(foundRow, cStatus + 1).setValue(ship);
-    sheet.getRange(foundRow, cTime + 1).setValue(ts);
-    SpreadsheetApp.flush();
-
-    return result_(true, 'UPDATED',
-      'Row ' + foundRow + ' updated: status="' + ship + '", time="' + ts + '".');
-
-  } catch (err) {
-    // Log full detail server-side; return a generic message to the client.
-    console.error('recordEntry error: ' + (err && err.stack ? err.stack : err));
-    return result_(false, 'ERROR', 'Server error while updating the sheet.');
-  } finally {
-    try { lock.releaseLock(); } catch (e) {}
-  }
-}
-
-// --- Helpers ---------------------------------------------------------------
-function sanitize_(v) {
-  // Coerce to string, trim, strip control chars.
-  return String(v == null ? '' : v).replace(/[\u0000-\u001F\u007F]/g, '').trim();
-}
-
-function indexOfHeader_(headers, name) {
-  var target = String(name).trim().toLowerCase();
-  for (var i = 0; i < headers.length; i++) {
-    if (String(headers[i]).trim().toLowerCase() === target) return i;
-  }
-  return -1;
-}
-
-function result_(ok, status, message) {
-  return { ok: !!ok, status: status, message: message };
-}
+            // Show table at start, even if empty
+            updateTable();
+        });
+    </script>
+</body>
+</html>
